@@ -5,3 +5,11 @@ numpy>=1.26
 scipy>=1.11
 scikit-learn>=1.4
 pyarrow>=15.0
+numbers-parser>=4.16   # parse the Apple Numbers marketing budget workbook (skills/common/parse_budget_workbook.py)
+
+# Marketing Mix Model (skills/python/py_marketing_mix_model.py):
+# the default "laplace" and "metropolis" backends are pure numpy/scipy (above).
+# Install the following ONLY to use the gold-standard NUTS backend (backend="pymc"),
+# which requires Python >= 3.10:
+#   pymc>=5
+#   arviz>=0.17

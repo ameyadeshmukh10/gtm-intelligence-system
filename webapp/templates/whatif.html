@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Budget What-if · GTM Intelligence{% endblock %}
+{% block content %}
+<h1>Budget What-if Planner</h1>
+{% if not res %}
+  <div class="banner">No MMM result. Run <strong>Rebuild Marketing Mix Model</strong> first.</div>
+{% else %}
+<p class="sub">Enter planned spend per channel for a period. Projection reads the fitted
+  response curves (no re-fit) — <strong>directional</strong>, not a forecast guarantee.</p>
+
+<form method="post" action="/mmm/whatif">
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Planned spend ($)</h3>
+      {% for c in res.channels %}
+        <label>{{ c.channel }} <span class="sub">(current ${{ '{:,.0f}'.format(c.total_spend) }})</span></label>
+        <input type="number" step="1000" name="spend_{{ c.channel }}"
+               value="{{ '%.0f'|format(c.total_spend) }}">
+        <div style="height:10px"></div>
+      {% endfor %}
+      <label>Scenario name (to save)</label>
+      <input type="text" name="scenario_name" placeholder="e.g. Q3 shift to outbound">
+      <div style="height:12px"></div>
+      <button class="btn" type="submit">Project</button>
+      <button class="btn ghost" type="submit" name="save" value="1">Project &amp; save</button>
+    </div>
+
+    <div class="card">
+      <h3>Projection</h3>
+      {% if projection and not projection.error %}
+        <div class="grid cols-2">
+          <div><div class="stat">{{ '%.0f'|format(projection.projected_total_deals) }}</div>
+            <small>projected total deals</small></div>
+          <div><div class="stat">{{ '%.0f'|format(projection.projected_incremental) }}</div>
+            <small>incremental · CI90 [{{ '%.0f'|format(projection.projected_incremental_ci90[0]) }},
+              {{ '%.0f'|format(projection.projected_incremental_ci90[1]) }}]</small></div>
+        </div>
+        <table style="margin-top:12px">
+          <tr><th>Channel</th><th class="num">Planned</th><th class="num">Proj. deals</th><th class="num">Δ vs now</th></tr>
+          {% for r in projection.channels %}
+          <tr><td>{{ r.channel }}</td>
+            <td class="num">${{ '{:,.0f}'.format(r.planned_spend) }}</td>
+            <td class="num">{{ '%.1f'|format(r.projected_contribution) }}</td>
+            <td class="num" style="color:{{ 'var(--good)' if r.delta>=0 else 'var(--bad)' }}">
+              {{ '%+.1f'|format(r.delta) }}</td></tr>
+          {% endfor %}
+        </table>
+      {% else %}
+        <p class="sub">Enter a plan and press Project.</p>
+      {% endif %}
+    </div>
+  </div>
+</form>
+
+{% if saved %}
+<h2>Saved scenarios</h2>
+<table>
+  <tr><th>Name</th><th class="num">Proj. total</th><th class="num">Incremental</th><th>Saved</th></tr>
+  {% for s in saved %}
+    {% set pj = s.projected_json|fromjson %}
+    <tr><td>{{ s.name }}</td>
+      <td class="num">{{ '%.0f'|format(pj.projected_total_deals) if pj else '—' }}</td>
+      <td class="num">{{ '%.0f'|format(pj.projected_incremental) if pj else '—' }}</td>
+      <td>{{ s.created_at }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endif %}
+{% endblock %}

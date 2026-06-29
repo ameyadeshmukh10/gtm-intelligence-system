@@ -1,0 +1,5 @@
+<div class="card">
+  <h3>Job {{ job.id }} — {{ job.label or job.name }} ({{ job.status }})</h3>
+  {% if job.error %}<div class="banner bad" style="border-color:var(--bad)">{{ job.error }}</div>{% endif %}
+  <div class="mono">{{ job.logs_text or '(no output yet)' }}</div>
+</div>

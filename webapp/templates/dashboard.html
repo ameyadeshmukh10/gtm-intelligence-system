@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Overview</h1>
+<p class="sub">Run the GTM analytics engine and consume its insights — no chat window.</p>
+
+<div class="grid cols-4">
+  <div class="card"><h3>MMM status</h3>
+    <div class="stat">{% if mmm %}Ready{% else %}—{% endif %}</div>
+    <small>{% if mmm %}{{ mmm.n_periods }} mo · {{ mmm.channels|length }} channels{% else %}run “Rebuild MMM”{% endif %}</small>
+  </div>
+  <div class="card"><h3>Baseline share</h3>
+    <div class="stat">{% if mmm %}{{ '%.0f'|format(mmm.baseline.pct_of_outcome) }}%<small> baseline</small>{% else %}—{% endif %}</div>
+    <small>{% if mmm %}{{ '%.0f'|format(mmm.incremental.pct_of_outcome) }}% marketing-incremental{% endif %}</small>
+  </div>
+  <div class="card"><h3>Datasets</h3>
+    <div class="stat">{{ datasets|length }}</div><small>recent pulls</small>
+  </div>
+  <div class="card"><h3>Audit results</h3>
+    <div class="stat">{{ n_results }}</div><small>stored analyses</small>
+  </div>
+</div>
+
+<div class="grid cols-2" style="margin-top:16px">
+  <div class="card">
+    <h3>Recent jobs</h3>
+    <table>
+      <tr><th>#</th><th>Job</th><th>Status</th><th>When</th></tr>
+      {% for j in recent_jobs %}
+      <tr><td>{{ j.id }}</td><td>{{ j.name }}</td>
+        <td><span class="chip {{ {'succeeded':'good','failed':'bad','running':'run'}.get(j.status,'') }}">{{ j.status }}</span></td>
+        <td>{{ j.created_at }}</td></tr>
+      {% else %}<tr><td colspan="4" class="sub">No jobs yet — go to Data &amp; Runs.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h3>Recent datasets</h3>
+    <table>
+      <tr><th>Entity</th><th>Source</th><th class="num">Rows</th><th>Pulled</th></tr>
+      {% for d in datasets %}
+      <tr><td>{{ d.entity }}</td><td>{{ d.source }}</td><td class="num">{{ d.n_records or '—' }}</td><td>{{ d.pulled_at }}</td></tr>
+      {% else %}<tr><td colspan="4" class="sub">No datasets yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="grid cols-3" style="margin-top:16px">
+  <a class="card" href="/mmm"><h3>Marketing Mix →</h3><div>Channel contribution, response curves, baseline vs incremental.</div></a>
+  <a class="card" href="/mmm/whatif"><h3>Budget What-if →</h3><div>Project deals from a planned per-channel spend.</div></a>
+  <a class="card" href="/audit"><h3>GTM Audit →</h3><div>Trend, conversion, clusters, cohorts, stage analysis.</div></a>
+</div>
+{% endblock %}

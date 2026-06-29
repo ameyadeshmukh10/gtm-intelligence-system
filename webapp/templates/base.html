@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}GTM Intelligence{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">GTM&nbsp;Intelligence</div>
+    <nav>
+      {% for href, label in nav %}
+        <a href="{{ href }}" class="{{ 'on' if active == href else '' }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <a class="logout" href="/logout">Sign out</a>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="foot">
+    Deterministic UI over the <code>skills/</code> engine · results are
+    <strong>directional</strong> until a lift experiment calibrates the MMM.
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

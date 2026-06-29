@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Data &amp; Runs · GTM Intelligence{% endblock %}
+{% block content %}
+<h1>Data &amp; Runs</h1>
+<p class="sub">Trigger pulls and pipelines as background jobs. Long-running HubSpot
+  pulls run on worker threads — status updates live below.</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Pipelines</h3>
+    {% for p in pipelines %}
+    <div style="border-bottom:1px solid var(--line); padding:10px 0">
+      <form method="post" action="/data/run/{{ p.key }}" style="display:flex; gap:12px; align-items:center; justify-content:space-between">
+        <div><strong>{{ p.label }}</strong><br><span class="sub">{{ p.description }}</span></div>
+        <button class="btn" type="submit">Run</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card">
+    <h3>Upload budget workbook</h3>
+    <p class="sub">Upload an Apple Numbers budget workbook to re-ingest spend and rebuild the MMM.
+      {% if workbook %}<br>Default: <code>{{ workbook }}</code>{% endif %}</p>
+    <form method="post" action="/data/upload-workbook" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".numbers" required>
+      <div style="height:12px"></div>
+      <button class="btn" type="submit">Upload &amp; rebuild</button>
+    </form>
+  </div>
+</div>
+
+<h2>Datasets</h2>
+<table>
+  <tr><th>Entity</th><th>Source</th><th class="num">Rows</th><th>Pulled</th><th>Path</th></tr>
+  {% for d in datasets %}
+  <tr><td>{{ d.entity }}</td><td>{{ d.source }}</td><td class="num">{{ d.n_records or '—' }}</td>
+    <td>{{ d.pulled_at }}</td><td class="sub">{{ d.parquet_path }}</td></tr>
+  {% else %}<tr><td colspan="5" class="sub">No datasets yet — run a pipeline above.</td></tr>{% endfor %}
+</table>
+
+<h2>Run history</h2>
+<table>
+  <tr><th>#</th><th>Job</th><th>Status</th><th>Created</th><th>Finished</th><th></th></tr>
+  {% for j in jobs %}
+  <tr id="job-{{ j.id }}"
+      {% if j.status in ('queued','running') %}hx-get="/jobs/{{ j.id }}" hx-trigger="load delay:2s"
+      hx-swap="outerHTML"{% endif %}>
+    <td>{{ j.id }}</td>
+    <td>{{ j.label or j.name }}</td>
+    <td><span class="chip {{ {'succeeded':'good','failed':'bad','running':'run','queued':''}.get(j.status,'') }}">{{ j.status }}</span></td>
+    <td>{{ j.created_at }}</td><td>{{ j.finished_at or '—' }}</td>
+    <td><a href="#" hx-get="/jobs/{{ j.id }}/logs" hx-target="#logs" hx-swap="innerHTML">logs</a>
+      {% if j.error %}<br><span class="sub" style="color:var(--bad)">{{ j.error[:80] }}</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="sub">No jobs yet.</td></tr>{% endfor %}
+</table>
+<div id="logs" style="margin-top:14px"></div>
+{% endblock %}

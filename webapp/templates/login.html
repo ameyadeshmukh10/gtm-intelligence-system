@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-box card">
+  <h1>GTM Intelligence</h1>
+  {% if not enabled %}
+    <p class="sub">Auth is disabled (no <code>APP_PASSWORD</code> set). Click to enter.</p>
+  {% else %}
+    <p class="sub">Enter the access password.</p>
+  {% endif %}
+  {% if error %}<div class="banner bad" style="border-color:var(--bad)">Incorrect password.</div>{% endif %}
+  <form method="post" action="/login">
+    {% if enabled %}
+    <label>Password</label>
+    <input type="password" name="password" autofocus>
+    <div style="height:12px"></div>
+    {% endif %}
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}GTM Audit · GTM Intelligence{% endblock %}
+{% block content %}
+<h1>GTM Audit Browser</h1>
+<p class="sub">Rendered outputs from the contact/deal-level analytical skills.</p>
+
+<div class="grid cols-4" style="grid-template-columns:280px 1fr">
+  <div class="card">
+    <h3>Results</h3>
+    {% for r in results %}
+      <div style="padding:7px 0; border-bottom:1px solid var(--line)">
+        <a href="/audit/view?skill={{ r.skill_name }}{% if r.run_id %}&run_id={{ r.run_id }}{% endif %}{% if r.result_path %}&path={{ r.result_path|urlencode }}{% endif %}">
+          {{ r.skill_name }}</a>
+        <div class="sub" style="font-size:11px">{{ r.run_id or r.source }}</div>
+      </div>
+    {% else %}<p class="sub">No results yet.</p>{% endfor %}
+  </div>
+
+  <div class="card">
+    {% if not view %}
+      <p class="sub">Select a result on the left to view it.</p>
+    {% else %}
+      <h3>{{ view.title }}</h3>
+      {% if view.note %}<div class="banner info">{{ view.note }}</div>{% endif %}
+      {% if view.chart %}<div id="c_audit" class="chart"></div>{% endif %}
+      {% if view.table %}
+        <table style="margin-top:12px">
+          <tr>{% for col in view.table.columns %}<th>{{ col }}</th>{% endfor %}</tr>
+          {% for row in view.table.rows %}
+            <tr>{% for cell in row %}<td>{{ cell if cell is not none else '—' }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </table>
+      {% endif %}
+      {% if view.json %}<div class="mono" style="margin-top:12px">{{ view.json }}</div>{% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if view and view.chart %}
+<script>
+const V = {{ view.chart|tojson }};
+const L = {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{color:'#cfd3ea'},
+  margin:{t:10,r:10,b:90,l:120}, xaxis:{gridcolor:'#2a3050'}, yaxis:{gridcolor:'#2a3050', title:V.ylabel||''}};
+let trace;
+if (V.type === 'line') {
+  trace = {type:'scatter', mode:'lines+markers', x:V.x, y:V.y, line:{color:'#6ea8fe'}};
+} else if (V.horizontal) {
+  trace = {type:'bar', orientation:'h', y:V.x.slice().reverse(), x:V.y.slice().reverse(), marker:{color:'#6ea8fe'}};
+} else {
+  trace = {type:'bar', x:V.x, y:V.y, marker:{color:'#6ea8fe'}};
+}
+Plotly.newPlot('c_audit', [trace], L, {displayModeBar:false, responsive:true});
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,22 @@
+# Railway deployment (later phase). Build from the Dockerfile and run uvicorn.
+#
+# REQUIRED manual setup in the Railway dashboard:
+#   1. Attach a persistent Volume mounted at /data  — SQLite + parquet artifacts
+#      need durable disk; the container filesystem is wiped on every redeploy.
+#   2. Set service variables:
+#        PIPELINE_DATA_DIR = /data
+#        HUBSPOT_TOKEN     = <your HubSpot private-app token>
+#        APP_PASSWORD      = <a strong shared password>     # gates the public URL
+#        SESSION_SECRET    = <a long random string>
+#   3. (Optional) BUDGET_WORKBOOK_PATH if you bake a workbook into the image.
+#
+# If the app ever goes multi-user / multi-instance, migrate SQLite -> Postgres
+# (the result-JSON-as-blob schema ports cleanly) since SQLite is single-writer.
+
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "uvicorn webapp.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"

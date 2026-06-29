@@ -1,0 +1,7 @@
+# Web application (webapp/). Install alongside the base skills deps:
+#   pip install -r requirements.txt -r requirements-web.txt
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+python-multipart>=0.0.9
+itsdangerous>=2.1

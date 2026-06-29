@@ -159,6 +159,52 @@ Early/mid/late cohort comparison (auto-terciles or explicit boundaries).
 
 ---
 
+## Marketing Mix Model skills (top-down, spend → pipeline)
+
+The MMM path is independent of `py_feature_engineering` — it builds a *period-level*
+time-series matrix, not a contact-level one. It requires **external marketing spend**
+(HubSpot has none). Pipeline: `load_spend` → `py_mmm_features` → `py_marketing_mix_model`.
+Driven by the **marketing-mix-analyst** agent.
+
+### load_spend (skills/common/)
+Ingest an external spend export (CSV/parquet, long or wide) and normalize raw channels into
+4–6 modeling groups. Flags sparse channels and short series.
+
+```json
+{"input":"data/templates/spend_example.csv","granularity":"month","layout":"long",
+ "channel_map":{"google_ads":"paid_search","linkedin_ads":"paid_social"}}
+```
+
+Outputs long parquet `(period, channel_group, spend[, impressions, clicks])`.
+
+### py_mmm_features
+Join deals-created-per-period (outcome) + spend-per-channel-per-period (media) + controls
+(trend, seasonality, sales capacity) into one time-indexed matrix. Emits an MMM manifest and
+warns when `params > periods` (under-identified — merge groups or aggregate weekly).
+
+```json
+{"run_id":"mmm_2026","deals_input":"data/raw/deals_<hash>.parquet",
+ "spend_input":"data/raw/spend_<hash>.parquet","granularity":"month",
+ "outcome":"deals_created"}
+```
+
+Outputs `data/features/<run_id>.parquet` + `data/features/<run_id>_mmm_manifest.json`.
+
+### py_marketing_mix_model
+Bayesian MMM: per-channel geometric **adstock** (carryover) + Hill **saturation**
+(diminishing returns), additive on the response scale, NegBin outcome. Returns per-channel
+contribution, marginal ROI, response curves, and baseline/incremental split — each with 90%
+credible intervals. Backends: `laplace` (default, pure numpy/scipy — MAP + Gaussian posterior),
+`metropolis` (numpy multi-chain, reports R-hat), `pymc` (NUTS, needs Python ≥3.10).
+
+```json
+{"run_id":"mmm_2026","backend":"laplace","draws":1500,"warmup":1500,"chains":4}
+```
+
+Outputs `data/results/<run_id>_marketing_mix_model.json`.
+
+---
+
 ## Filter operator reference (hs_pull_*)
 
 | Input | HubSpot op |
