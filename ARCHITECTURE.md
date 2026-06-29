@@ -22,6 +22,8 @@ This document explains in detail how this repository works: every layer, every c
 14. [Extension patterns](#14-extension-patterns)
 15. [Known limits and technical debt](#15-known-limits-and-technical-debt)
 16. [Why these choices](#16-why-these-choices)
+17. [Marketing Mix Model (top-down extension)](#17-marketing-mix-model-top-down-extension)
+18. [Web application](#18-web-application)
 
 ---
 
@@ -38,6 +40,8 @@ This is an **agentic GTM analytics system** built on top of HubSpot. A user, wor
 It is a port of the **EverWorker GTM Intelligence System v2** spec (see `EverWorker_GTM_Intelligence_System_v2-1.docx` in the repo root) from EverWorker's hosted-agent platform to Claude Code's native subagent infrastructure. Same conceptual architecture; different runtime.
 
 The output is **not** a dashboard, not a slide deck, not a CSV export. It is interpretive analysis in markdown, written for human decision-makers, with every claim traceable to specific HubSpot data.
+
+> **Two extensions have since been added** (documented in §17–§18): a **Marketing Mix Model** — a top-down, spend→pipeline Bayesian model that *complements* the bottom-up attribution analysts — and an optional **web application** (`webapp/`) that provides a UI and SQLite storage for running analyses and visualizing results without a chat window. The core principle above still holds for the analytics layer; the web app is a separate consumption surface over the same on-disk artifacts.
 
 ---
 
@@ -320,11 +324,13 @@ Each follows the same input/output contract (see §7). Each reads the manifest v
 | `py_trend_analysis` | Monthly conversion rate + Spearman vs month index; auto-detects date column | Monthly table, direction, meaningful flag, recency-bias warning |
 | `py_cohort_analysis` | Tercile cohort split (auto or explicit boundaries); chi² across cohorts; feature distribution per cohort | Cohort sizes/rates, profile shifts |
 
+> **Beyond these 11:** the Marketing Mix Model extension adds four more common/Python skills (`parse_budget_workbook`, `load_spend`, `py_mmm_features`, `py_marketing_mix_model`) that operate on **aggregate time series** rather than the contact feature matrix — they are *not* manifest-driven and do not use `load_run`. See §17.
+
 ---
 
 ## 6. Layer 3 — Agent brains
 
-`.claude/agents/` contains 6 markdown files. Each is a Claude Code subagent definition.
+`.claude/agents/` contains 7 markdown files. Each is a Claude Code subagent definition.
 
 ### Subagent file format
 
@@ -362,7 +368,7 @@ model: sonnet
 
 The YAML frontmatter is read by Claude Code at session start. The body becomes the agent's system prompt. When another agent (typically the orchestrator) invokes this subagent via the `Task` tool, Claude Code spawns a new agent with this system prompt and the listed tools, receives the agent's final response, and returns it.
 
-### The six agents
+### The seven agents
 
 | Agent | Role | Domain |
 |---|---|---|
@@ -372,6 +378,7 @@ The YAML frontmatter is read by Claude Code at session start. The body becomes t
 | `signal-combination-analyst` | Pairwise + triple combos; SYNERGY/SUPPRESSION interaction detection; KMeans archetypes | Contact level |
 | `trend-intelligence-analyst` | Monthly trends; per-program cohort grids; event-window impact; recency-bias-aware | Contact level (temporal) |
 | `icp-synthesis-analyst` | Cross-stage ICP: which firmographic attributes hold up at every gate, not just S0 | Deal + contact joined |
+| `marketing-mix-analyst` | Top-down Bayesian MMM: spend→pipeline by channel; adstock + saturation; budget allocation, ROI, response curves. *Complements*, never replaces, program-attribution (§17) | Aggregate time series |
 
 Each specialist's body contains:
 - The MUST-follow rule block (links to `docs/analysis_rules.md`)
@@ -807,9 +814,17 @@ The user sees the orchestrator's final response. The 5 specialist briefings are 
 - **Owner records can be archived.** A `hubspot_owner_id` referenced on a deal may 404 when looked up via `/crm/v3/owners/<id>`. Code handles this with a fallback.
 - **No automated tests.** Skills have been smoke-tested end-to-end with synthetic data; no formal test suite yet.
 
+### Marketing Mix Model limits (§17)
+
+- **No spend data in HubSpot.** The MMM requires marketing spend by channel by period from an *external* source (the budget workbook). Without it the model cannot run — engagement counts are not a substitute for dollars.
+- **Thin, monthly data.** This instance has ~17 monthly periods, which supports ~4 identifiable channel groups. Beyond that the model is under-identified: per-channel contributions collapse toward their priors and every credible interval includes zero. `load_spend` and `py_mmm_features` warn on this; do not present under-identified channel ROI as fact.
+- **Monthly granularity hides short carryover.** Adstock half-lives shorter than a month (branded search, retargeting) are invisible at monthly resolution; weekly spend is needed to estimate them.
+- **Observational, not causal.** MMM output is regularized correlation until a lift experiment (geo or account holdout) calibrates it. Always-on channels have their *level* confounded with the baseline; only their *variation* is identified.
+- **PyMC backend needs Python 3.11+.** The default `laplace` and `metropolis` backends run anywhere (NumPy/SciPy); the NUTS `pymc` backend is unavailable on the local Python 3.9 and is intended for the Railway 3.11 image.
+
 ### Things the system doesn't do (intentional)
 
-- **No dashboards or charts.** Output is markdown + structured CSV/parquet artifacts. The interpretation is in the text.
+- **No dashboards or charts in the analytics layer.** The skills and agents emit markdown + structured CSV/parquet/JSON; the interpretation is in the text. The optional `webapp/` consumption layer (§18) renders Plotly charts over those same artifacts but adds no new analytics.
 - **No CRM writes.** All HubSpot calls are read-only. The system never updates deals, contacts, or properties.
 - **No live monitoring or alerts.** Each user prompt is an ad-hoc pull. There's no scheduled job or watchlist.
 - **No causal inference.** Every claim is correlational. Agents are forbidden from using causal language unless a clean natural experiment exists in the data.
@@ -871,6 +886,83 @@ The user sees the orchestrator's final response. The 5 specialist briefings are 
 
 ---
 
+## 17. Marketing Mix Model (top-down extension)
+
+The six original analysts are **bottom-up**: they read person-level touch history and ask *"which programs/signals appear on the contacts that became opportunities?"* The Marketing Mix Model is the **top-down complement**. It never looks at an individual deal's source. It regresses **one outcome time series** (deals/opps created per period) on **spend-per-channel-per-period**, and infers each channel's contribution from how spend and outcomes co-move over time. This is what lets it capture brand/halo effects that deal-level tags miss — at the cost of never knowing which specific deal a dollar bought. Use it for **budget allocation**; use program-attribution for **program cuts**. (Full reasoning and guardrails live in `.claude/agents/marketing-mix-analyst.md`.)
+
+### The pipeline (four new skills)
+
+```
+parse_budget_workbook → load_spend → py_mmm_features → py_marketing_mix_model
+   (.numbers → CSV)     (channel       (period×channel    (Bayesian fit +
+                         grouping)      design matrix)      decomposition)
+```
+
+| Skill | Layer | What it does |
+|---|---|---|
+| `skills/common/parse_budget_workbook` | ingestion | Parses the Apple **`.numbers`** marketing budget into a tidy long spend CSV (`period, channel, spend`). Reproducible — re-run when the workbook updates. Keeps the workbook's faithful, granular line items. |
+| `skills/common/load_spend` | ingestion | Normalizes raw channels into a small set of **modeling groups** (you can't identify 11 channels from ~17 points). Supports explicit **exclusion** of brand/operating spend (map a channel to `null`). Warns on sparsity and unmapped channels. |
+| `skills/python/py_mmm_features` | design matrix | Builds the period × channel matrix: outcome = **deals_created** per period (deal-create dates, *not* closed-won), plus controls (trend, annual Fourier seasonality, `active_owners` sales-capacity proxy, optional `eng_volume`). Emits an **MMM manifest** tagging `outcome/media/control/date`. Warns when `params > periods` (**under-identified**). |
+| `skills/python/py_marketing_mix_model` | model | Per-channel **adstock** (geometric carryover) + **Hill saturation**, then a Negative-Binomial model that is **additive on the response scale** so `baseline + Σ channel contributions = fitted total exactly`. Bayesian with three backends — `laplace` (default; NumPy/SciPy, runs anywhere), `metropolis` (cross-check, reports Gelman-Rubin R̂), `pymc` (NUTS, needs Py3.11). Outputs contribution + **90% CIs**, marginal ROI, response curves, baseline-vs-incremental split, and diagnostics. |
+
+### Why it breaks the manifest-driven pattern
+
+Every other Python skill reads the contact feature matrix via `load_run(run_id)` (§8). The MMM skills don't — they operate on **aggregate time series** with their own MMM manifest. This is deliberate: MMM is a fundamentally different unit of analysis (period, not contact).
+
+### Canonical configuration (this instance)
+
+- **4 channel groups:** `events` / `paid_social` (LinkedIn + YouTube) / `paid_search` (Google) / `outbound`. Organic-content and martech spend are **excluded** (brand/operating, not demand channels).
+- **Outcome:** deals created per **month**.
+- The hard rules the analyst enforces: MMM ≠ attribution · deals-created not closed-won · spend is required and external · group to ≤4–6 channels · always quote CIs · name always-on confounding · present as **directional** until a lift experiment calibrates it.
+
+See §15 "Marketing Mix Model limits" for why the per-channel numbers are directional on this data.
+
+---
+
+## 18. Web application
+
+The original system is consumable only from a Claude Code chat. `webapp/` adds a **standalone UI with its own storage** so analyses can be run and insights consumed without chat — runnable locally now, deployable to Railway later.
+
+### How it reuses the system without rewriting it
+
+The web app **invokes every skill unchanged as a subprocess** and parses the standard JSON envelope (§7):
+
+```python
+run_skill(module, params) = subprocess.run(
+    [sys.executable, "-m", module, json.dumps(params)],
+    cwd=<repo root>, env={**os.environ, PIPELINE_DATA_DIR, HUBSPOT_TOKEN})
+# → parse the single-line envelope, persist results + metadata.artifacts paths
+```
+
+No analytics are reimplemented. This is only possible *because* the skill contract is a clean stateless boundary — the web app is the clearest demonstration of why that contract (§7) matters.
+
+### Stack and components
+
+FastAPI + Jinja2 + **HTMX** + **Plotly** — one process, server-rendered, **no JS build step**. SQLite for storage. `v1` is **deterministic-only**: it runs skills and visualizes results; there is no LLM in the web path (the agentic synthesis layer stays in chat).
+
+| File | Responsibility |
+|---|---|
+| `webapp/config.py` | Env settings: `PIPELINE_DATA_DIR`, `DB_URL`, `APP_PASSWORD`, `HUBSPOT_TOKEN`, worker count |
+| `webapp/db.py` / `models.py` | SQLModel engine + ORM: `Job`, `Run`, `ResultArtifact`, `Dataset`, `SpendUpload`, `MmmModel`, `Scenario` (SQLite at `$PIPELINE_DATA_DIR/app.db`) |
+| `webapp/auth.py` | Single shared-password session gate; **disabled when `APP_PASSWORD` is unset** (local). Multi-user accounts deferred — logic isolated so a `User` table slots in later |
+| `webapp/jobs.py` | **SQLite-backed background worker** — HubSpot pulls and MMM rebuilds are slow/external, so they run as jobs (no Redis; keeps it single-service for Railway). Jobs persist and survive restarts; HTMX polls `/jobs/{id}` for live status + logs |
+| `webapp/skills_registry.py` | Catalog of skills + the canonical multi-skill pipelines (rebuild MMM, run audit) |
+| `webapp/routers/{dashboard,mmm,data,audit}.py`, `services/` | Request handlers + result-shaping |
+
+### The four surfaces
+
+1. **MMM dashboard** — flagship. Contribution bars with **90% CI error bars**, response curves with a current-spend marker, baseline-vs-incremental split, spend-vs-deals timeline. Surfaces the honest guardrails (under-identification, CI-includes-0, calibration caveat) as UI annotations rather than hiding them.
+2. **Budget what-if planner** — enter a per-channel spend plan; projects incremental deals by reading each channel's fitted **response curve** (no re-fit — fast, labeled directional). Scenarios are saved for side-by-side comparison.
+3. **Data refresh + run history** — one-click background jobs (refresh deals, re-ingest budget workbook, rebuild MMM, run GTM audit); dataset freshness + row counts; live job logs.
+4. **GTM audit browser** — a generic renderer mapping each skill's result JSON (trend, categorical, RF, kmeans, cohort, …) to a table + chart.
+
+### Local run and Railway deploy
+
+- **Local:** `python3 -m uvicorn webapp.main:app --reload`; deps in `requirements-web.txt`; `.env` supplies `HUBSPOT_TOKEN` (+ optional `APP_PASSWORD`); SQLite + parquet under `./data`.
+- **Railway (later):** `Dockerfile` + `railway.toml` are included — single web service on a **Python 3.11** image (which also unlocks the `pymc` MMM backend), `uvicorn … --host 0.0.0.0 --port $PORT`, with a **persistent Volume mounted at `/data`** (SQLite + parquet need durable disk or a redeploy wipes them) and `PIPELINE_DATA_DIR=/data`.
+
+---
+
 ## TL;DR
 
-A user asks a GTM question in Claude Code. An orchestrator agent decomposes it, dispatches one or more specialist agents (or calls skills directly), each of which invokes Python skills via Bash. HubSpot skills pull live data; statistical skills auto-resolve features from a column manifest written by `py_feature_engineering`. Every skill returns a compact JSON envelope; full results live on disk in `data/`. Analytical rules (intersection-based opportunity targets, marketing-cohort definition, sanity gates) are codified in `docs/analysis_rules.md` and enforced via agent system prompts. The orchestrator synthesizes across specialists and writes the user-facing briefing. Past mistakes live in persistent memory files that auto-load into every session. The math is reproducible; the reasoning is auditable; the data on disk is inspectable.
+A user asks a GTM question in Claude Code. An orchestrator agent decomposes it, dispatches one or more specialist agents (or calls skills directly), each of which invokes Python skills via Bash. HubSpot skills pull live data; statistical skills auto-resolve features from a column manifest written by `py_feature_engineering`. Every skill returns a compact JSON envelope; full results live on disk in `data/`. Analytical rules (intersection-based opportunity targets, marketing-cohort definition, sanity gates) are codified in `docs/analysis_rules.md` and enforced via agent system prompts. The orchestrator synthesizes across specialists and writes the user-facing briefing. Past mistakes live in persistent memory files that auto-load into every session. The math is reproducible; the reasoning is auditable; the data on disk is inspectable. Two extensions sit on top of this same foundation: a top-down **Marketing Mix Model** (§17) that turns external spend into channel-level pipeline attribution, and a deterministic **web application** (§18) that runs the skills and visualizes their results outside the chat window — both reusing the skill contract unchanged.
