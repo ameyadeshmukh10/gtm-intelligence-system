@@ -1,0 +1,10 @@
+<tr id="job-{{ job.id }}"
+    {% if job.status in ('queued','running') %}hx-get="/jobs/{{ job.id }}" hx-trigger="load delay:2s"
+    hx-swap="outerHTML"{% endif %}>
+  <td>{{ job.id }}</td>
+  <td>{{ job.label or job.name }}</td>
+  <td><span class="chip {{ {'succeeded':'good','failed':'bad','running':'run','queued':''}.get(job.status,'') }}">{{ job.status }}</span></td>
+  <td>{{ job.created_at }}</td><td>{{ job.finished_at or '—' }}</td>
+  <td><a href="#" hx-get="/jobs/{{ job.id }}/logs" hx-target="#logs" hx-swap="innerHTML">logs</a>
+    {% if job.error %}<br><span class="sub" style="color:var(--bad)">{{ job.error[:80] }}</span>{% endif %}</td>
+</tr>

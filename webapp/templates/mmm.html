@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Marketing Mix · GTM Intelligence{% endblock %}
+{% block content %}
+<h1>Marketing Mix Model</h1>
+
+{% if not res %}
+  <div class="banner">No MMM result found. Go to <a href="/data">Data &amp; Runs</a> and run
+    <strong>Rebuild Marketing Mix Model</strong>.</div>
+{% else %}
+<p class="sub">Deals created per {{ res.granularity }} explained by spend per channel —
+  {{ res.n_periods }} periods, {{ res.channels|length }} channel groups,
+  sampler <code>{{ res.diagnostics.sampler }}</code>.</p>
+
+<div class="grid cols-3">
+  <div class="card"><h3>Total deals created</h3><div class="stat">{{ '%.0f'|format(res.y_total) }}</div></div>
+  <div class="card"><h3>Baseline</h3><div class="stat">{{ '%.0f'|format(res.baseline.mean) }}
+    <small>{{ '%.0f'|format(res.baseline.pct_of_outcome) }}%</small></div>
+    <small>CI90 [{{ '%.0f'|format(res.baseline.ci90[0]) }}, {{ '%.0f'|format(res.baseline.ci90[1]) }}]</small></div>
+  <div class="card"><h3>Marketing-incremental</h3><div class="stat">{{ '%.0f'|format(res.incremental.mean) }}
+    <small>{{ '%.0f'|format(res.incremental.pct_of_outcome) }}%</small></div>
+    <small>CI90 [{{ '%.0f'|format(res.incremental.ci90[0]) }}, {{ '%.0f'|format(res.incremental.ci90[1]) }}]</small></div>
+</div>
+
+<div class="banner">Every channel's 90% credible interval includes zero on this thin monthly series —
+  read this as <strong>spend accounting + the baseline-vs-incremental split</strong>, not a hard channel ranking.
+  Directional until a lift test (e.g. a paid-social pause) calibrates it.</div>
+
+<div class="grid cols-2">
+  <div class="card"><h3>Channel contribution (deals, 90% CI)</h3><div id="c_contrib" class="chart"></div></div>
+  <div class="card"><h3>Baseline vs incremental</h3><div id="c_split" class="chart"></div></div>
+</div>
+
+<div class="card" style="margin-top:16px"><h3>Response curves — spend → incremental deals</h3>
+  <div id="c_curves" class="chart" style="height:380px"></div>
+  <small class="sub">Dots mark current spend. Diminishing slope = saturation; flat near zero = no separable effect.</small>
+</div>
+
+<div class="card" style="margin-top:16px"><h3>Spend vs deals created over time</h3>
+  <div id="c_ts" class="chart"></div></div>
+
+<h2>Per-channel detail</h2>
+<table>
+  <tr><th>Channel</th><th class="num">Spend</th><th class="num">Incr. deals</th>
+    <th>90% CI</th><th class="num">$/incr deal</th><th class="num">Adstock decay</th><th>Flag</th></tr>
+  {% for c in channels|sort(attribute='rank') %}
+  <tr>
+    <td>{{ c.channel }}</td>
+    <td class="num">${{ '{:,.0f}'.format(c.total_spend) }}</td>
+    <td class="num">{{ '%.1f'|format(c.contribution_mean) }}</td>
+    <td>[{{ '%.0f'|format(c.contribution_ci90[0]) }}, {{ '%.0f'|format(c.contribution_ci90[1]) }}]</td>
+    <td class="num">{% if c.cost_per_incremental_unit %}${{ '{:,.0f}'.format(c.cost_per_incremental_unit) }}{% else %}—{% endif %}</td>
+    <td class="num">{{ '%.2f'|format(c.adstock_decay_mean) }}</td>
+    <td>{% if c.ci_zero %}<span class="chip warn">CI includes 0</span>{% else %}<span class="chip good">separable</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="sub">Reallocation ranking (best ROI first): {{ res.reallocation_ranking|join(' › ') }}.
+  Diagnostics: flat directions {{ res.diagnostics.n_flat_directions }},
+  grad@mode {{ '%.1e'|format(res.diagnostics.grad_norm_at_mode) }}.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if res %}
+<script>
+const CH = {{ charts.contrib|tojson }};
+const CURVES = {{ charts.curves|tojson }};
+const TS = {{ charts.timeseries|tojson }};
+const BASE = {{ charts.baseline|tojson }};
+const INC = {{ charts.incremental|tojson }};
+const LAYOUT = {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+  font:{color:'#cfd3ea'}, margin:{t:10,r:10,b:40,l:50}, showlegend:false,
+  xaxis:{gridcolor:'#2a3050'}, yaxis:{gridcolor:'#2a3050'}};
+const CFG = {displayModeBar:false, responsive:true};
+
+Plotly.newPlot('c_contrib', [{
+  type:'bar', x:CH.channels, y:CH.means,
+  error_y:{type:'data', symmetric:false,
+    array:CH.ci_hi.map((h,i)=>h-CH.means[i]),
+    arrayminus:CH.means.map((m,i)=>m-CH.ci_lo[i]), color:'#9aa0bd'},
+  marker:{color:'#6ea8fe'}}], {...LAYOUT, yaxis:{...LAYOUT.yaxis, title:'incremental deals'}}, CFG);
+
+Plotly.newPlot('c_split', [{
+  type:'bar', x:['deals'], y:[BASE.mean], name:'baseline', marker:{color:'#475569'}},
+  {type:'bar', x:['deals'], y:[INC.mean], name:'incremental', marker:{color:'#6ea8fe'}}],
+  {...LAYOUT, barmode:'stack', showlegend:true, legend:{orientation:'h'}}, CFG);
+
+Plotly.newPlot('c_curves', CURVES.flatMap(c => ([
+  {type:'scatter', mode:'lines', name:c.channel, x:c.spend, y:c.contribution},
+  {type:'scatter', mode:'markers', x:[c.current_spend], y:[c.current_contribution],
+    marker:{size:9}, showlegend:false}
+])), {...LAYOUT, showlegend:true, legend:{orientation:'h'},
+  xaxis:{...LAYOUT.xaxis, title:'spend ($)'}, yaxis:{...LAYOUT.yaxis, title:'incremental deals'}}, CFG);
+
+if (TS) {
+  Plotly.newPlot('c_ts', [
+    {type:'bar', x:TS.period, y:TS.spend_total, name:'spend', marker:{color:'#334155'}, yaxis:'y2'},
+    {type:'scatter', mode:'lines+markers', x:TS.period, y:TS.y, name:'deals', line:{color:'#4ade80'}}
+  ], {...LAYOUT, showlegend:true, legend:{orientation:'h'},
+    yaxis:{...LAYOUT.yaxis, title:'deals'},
+    yaxis2:{overlaying:'y', side:'right', title:'spend ($)', gridcolor:'transparent'}}, CFG);
+}
+</script>
+{% endif %}
+{% endblock %}
