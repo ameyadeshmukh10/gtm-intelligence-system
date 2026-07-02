@@ -26,6 +26,7 @@ NAV = [
     ("/", "Overview"),
     ("/mmm", "Marketing Mix"),
     ("/mmm/whatif", "Budget What-if"),
+    ("/influence", "Influence"),
     ("/data", "Data & Runs"),
     ("/audit", "GTM Audit"),
 ]

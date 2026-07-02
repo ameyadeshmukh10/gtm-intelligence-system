@@ -14,4 +14,7 @@ venv/
 data/app.db
 data/app.db-wal
 data/app.db-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm
 data/raw/uploaded_workbook.numbers

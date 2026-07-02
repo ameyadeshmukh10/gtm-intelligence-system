@@ -33,6 +33,7 @@ SKILLS: dict[str, dict[str, Any]] = {
     "py_kmeans_cluster":  {"module": "skills.python.py_kmeans_cluster",   "group": "audit",   "long_running": False, "label": "KMeans clusters"},
     "py_cohort_analysis": {"module": "skills.python.py_cohort_analysis",  "group": "audit",   "long_running": False, "label": "Cohort analysis"},
     "py_stage_conversion":{"module": "skills.python.py_stage_conversion", "group": "audit",   "long_running": False, "label": "Stage conversion"},
+    "influence_report":   {"module": "skills.reports.influence_report",    "group": "report",  "long_running": True,  "label": "Marketing influence report"},
 }
 
 # Canonical 4-group config (mirrors the marketing-mix-analyst canonical run).

@@ -40,7 +40,7 @@ def _skill_from_filename(name: str) -> str:
     for s in ("trend_analysis", "categorical_conversion", "random_forest",
               "kmeans_cluster", "cohort_analysis", "stage_conversion",
               "combination_analysis", "interaction_effects", "mann_whitney",
-              "logistic_regression", "spearman"):
+              "logistic_regression", "spearman", "influence_report"):
         if stem.endswith(s):
             return s
     return stem.split("_")[-1]
@@ -161,6 +161,28 @@ def _stage(res):
     }
 
 
+def _influence(res):
+    periods = res.get("periods", [])
+    t = res.get("totals", {})
+    return {
+        "title": "Marketing influence report",
+        "note": (f"{t.get('influenced_deals')}/{t.get('n_deals')} deals "
+                 f"({(t.get('pct_deals_influenced') or 0):.1%}) and "
+                 f"${(t.get('influenced_pipeline_usd') or 0):,.0f}/"
+                 f"${(t.get('pipeline_usd') or 0):,.0f} pipeline "
+                 f"({(t.get('pct_pipeline_influenced') or 0):.1%}) influenced by organic/direct/blog"),
+        "table": {"columns": ["period", "deals", "influenced", "cold", "infl_rate",
+                              "infl_pipeline", "cold_pipeline"],
+                  "rows": [[p.get("period"), p.get("total_deals"), p.get("influenced_deals"),
+                            p.get("cold_deals"), round(p.get("influence_rate_deals", 0), 4),
+                            round(p.get("influenced_pipeline_usd", 0)),
+                            round(p.get("cold_pipeline_usd", 0))] for p in periods]},
+        "chart": {"type": "bar", "x": [p.get("period") for p in periods],
+                  "y": [round(p.get("influence_rate_deals", 0) * 100, 1) for p in periods],
+                  "ylabel": "% deals influenced"},
+    }
+
+
 _RENDERERS = {
     "trend_analysis": _trend,
     "categorical_conversion": _categorical,
@@ -168,4 +190,5 @@ _RENDERERS = {
     "kmeans_cluster": _kmeans,
     "cohort_analysis": _cohort,
     "stage_conversion": _stage,
+    "influence_report": _influence,
 }

@@ -149,3 +149,29 @@ Every analytical output that contains a rate must include the target definition 
 > Target: `has_opp` = contact is associated with a deal in the windowed deal set AND lifecyclestage ∈ {opportunity, salesqualifiedlead, customer}. n_positive = 184 of 10,951 contacts (1.68% baseline).
 
 If the reader can't reconstruct the target from the output, the output is not usable.
+
+---
+
+## Appendix — Marketing-Influence signal definition (LOCKED)
+
+The Marketing-Influence Cohort Report (`skills/reports/influence_report.py`, driven by the
+`marketing-influence-analyst` agent and the web app `/influence` surface) uses a **fixed, non-negotiable**
+definition of "influence." It lives in code at `skills/common/marketing_signals.py` — the single source
+of truth. Do not redefine it per analysis.
+
+A deal is **influenced** if ANY node in its graph carries ANY of these organic/direct/blog signals:
+
+- **Contact** (deal-direct contacts AND up to N=25 of each associated company's other contacts):
+  - `hs_analytics_source` ∈ {ORGANIC_SEARCH, DIRECT_TRAFFIC}, or `hs_latest_source` ∈ {ORGANIC_SEARCH, DIRECT_TRAFFIC}
+  - blog activity: `hs_analytics_first_url` / `hs_analytics_last_url` / `hs_analytics_first_referrer` / `hs_analytics_last_referrer` contains "blog"
+- **Company** (the deal's associated companies):
+  - `hs_analytics_source` ∈ {ORGANIC_SEARCH, DIRECT_TRAFFIC}
+  - LinkedIn organic: `fibbler_linkedin_organic_(impressions|engagements)_<acct>_90_days` > 0 (account id discovered dynamically, never hardcoded)
+
+**Cohort** = influenced vs cold, bucketed by deal `createdate` at week / month / quarter granularity.
+Metric = deal count + pipeline $ per cohort per period.
+
+**Compliance:** ORGANIC_SEARCH and DIRECT_TRAFFIC are mutually exclusive with OFFLINE, so this cohort is
+clean under Rule 5 by construction. Blog visits are counted as genuine site engagement. The report emits
+its target definition string (Rule 6) and a sanity line (influenced ≤ total; Rule 3) in every run.
+Caveat every report: blog activity is undercounted because HubSpot stores only first/last URL per contact.

@@ -963,6 +963,59 @@ FastAPI + Jinja2 + **HTMX** + **Plotly** — one process, server-rendered, **no 
 
 ---
 
+## 19. Marketing Influence Report (repeatable cohort report)
+
+A productized version of an analysis we used to run by hand every time: **how much created pipeline and
+how many created deals carried an organic/direct/blog marketing signal**, split influenced-vs-cold, over
+time. It exists because the ad-hoc version was non-reproducible, token-expensive, and un-consumable from
+the web app.
+
+**Design — one self-contained skill, not a manifest chain.** Unlike the contact-level analysts (which
+chain `hs_pull_* → py_feature_engineering → py_*`), the influence report is a **single skill**
+(`skills/reports/influence_report.py`) that runs the whole chain internally via `HubSpotClient`. The
+reason: the graph traversal (deal IDs → associations → contact/company IDs → batch-read) can't thread
+cleanly through separate subprocess steps, and batch-reading by arbitrary ID list isn't an existing
+skill. One skill = one agent tool-call = one web-app job. That is the token-efficiency and determinism win.
+
+**The graph** (per deal created in `[start, end]` on `pipeline`):
+```
+deal
+├── directly associated contacts        → contact signals
+└── associated companies
+    ├── company object signals           → company signals
+    └── company's associated contacts    → contact signals   (capped at N=25/company)
+```
+
+**Locked signal set** (in `skills/common/marketing_signals.py`, the single source of truth): contact
+`hs_analytics_source`/`hs_latest_source` ∈ {ORGANIC_SEARCH, DIRECT_TRAFFIC}; contact first/last URL or
+referrer contains "blog"; company `hs_analytics_source` ∈ {ORGANIC_SEARCH, DIRECT_TRAFFIC}; company
+LinkedIn organic impressions/engagements (90d) > 0 (Fibbler account id **discovered dynamically**, never
+hardcoded). A deal is *influenced* if any node carries any signal.
+
+**Modules:**
+- `skills/common/marketing_signals.py` — locked definitions + `discover_linkedin_organic_props`, `contact_signal_flags`, `company_signal_flags`, `target_definition_text`.
+- `skills/common/deal_graph.py` — `build_deal_graph(...)`: the pull/association/batch-read chain, caching raw parquets to `data/raw/`.
+- `skills/reports/influence_report.py` — orchestrates graph → signals → deal rollup → period cohorts; writes detail parquet + manifest + results JSON; emits the envelope.
+
+**Outputs** per run: per-period influenced-vs-cold deal count + pipeline $, a sub-signal breakdown, totals
+with %, a Rule-6 target-definition string, and a Rule-3 sanity line. Deterministic: identical params →
+byte-identical results (no randomness).
+
+**Consumption:**
+- **Chat** — the `marketing-influence-analyst` agent (on-demand, not in the default audit) makes the ONE
+  skill call and writes the briefing; it never re-derives the logic inline.
+- **Web app** — a fifth surface, `/influence`: date-range + granularity + company-contact-cap controls,
+  enqueues the skill as a background job, polls via HTMX, and renders headline cards, a Plotly
+  influenced-vs-cold stacked bar + influence-rate line, a per-period cohort table, and the sub-signal
+  breakdown. Runs are saved (via the standard `result_artifact` table + on-disk JSON) and revisitable,
+  and also appear in the GTM audit browser through a dedicated renderer.
+
+**Rule compliance:** organic/direct are OFFLINE-exclusive so the cohort is clean under Rule 5; the report
+states its target definition (Rule 6) and sanity-checks influenced ≤ total (Rule 3). Caveat every run:
+blog activity is undercounted because HubSpot stores only first/last URL per contact.
+
+---
+
 ## TL;DR
 
-A user asks a GTM question in Claude Code. An orchestrator agent decomposes it, dispatches one or more specialist agents (or calls skills directly), each of which invokes Python skills via Bash. HubSpot skills pull live data; statistical skills auto-resolve features from a column manifest written by `py_feature_engineering`. Every skill returns a compact JSON envelope; full results live on disk in `data/`. Analytical rules (intersection-based opportunity targets, marketing-cohort definition, sanity gates) are codified in `docs/analysis_rules.md` and enforced via agent system prompts. The orchestrator synthesizes across specialists and writes the user-facing briefing. Past mistakes live in persistent memory files that auto-load into every session. The math is reproducible; the reasoning is auditable; the data on disk is inspectable. Two extensions sit on top of this same foundation: a top-down **Marketing Mix Model** (§17) that turns external spend into channel-level pipeline attribution, and a deterministic **web application** (§18) that runs the skills and visualizes their results outside the chat window — both reusing the skill contract unchanged.
+A user asks a GTM question in Claude Code. An orchestrator agent decomposes it, dispatches one or more specialist agents (or calls skills directly), each of which invokes Python skills via Bash. HubSpot skills pull live data; statistical skills auto-resolve features from a column manifest written by `py_feature_engineering`. Every skill returns a compact JSON envelope; full results live on disk in `data/`. Analytical rules (intersection-based opportunity targets, marketing-cohort definition, sanity gates) are codified in `docs/analysis_rules.md` and enforced via agent system prompts. The orchestrator synthesizes across specialists and writes the user-facing briefing. Past mistakes live in persistent memory files that auto-load into every session. The math is reproducible; the reasoning is auditable; the data on disk is inspectable. Three extensions sit on top of this same foundation: a top-down **Marketing Mix Model** (§17) that turns external spend into channel-level pipeline attribution, a deterministic **web application** (§18) that runs the skills and visualizes their results outside the chat window, and a repeatable **Marketing Influence Report** (§19) — one self-contained skill that measures organic/direct/blog influence on created pipeline over time, consumable from both chat and a dedicated web-app surface. All reuse the skill contract unchanged.

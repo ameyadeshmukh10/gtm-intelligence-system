@@ -11,7 +11,7 @@ from starlette.responses import RedirectResponse, JSONResponse
 
 from . import auth, db, jobs
 from .config import SESSION_SECRET
-from .routers import audit, dashboard, data, mmm
+from .routers import audit, dashboard, data, influence, mmm
 from .templating import render
 
 app = FastAPI(title="GTM Intelligence")
@@ -27,6 +27,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
 app.include_router(dashboard.router)
 app.include_router(mmm.router)
+app.include_router(influence.router)
 app.include_router(data.router)
 app.include_router(audit.router)
 

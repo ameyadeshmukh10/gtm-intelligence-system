@@ -54,6 +54,8 @@ Quick reference for mapping user prompts to a specialist:
 | "which signal combinations / synergies / archetypes" | signal-combination-analyst |
 | "is conversion rate improving / trend / cohort / event impact" | trend-intelligence-analyst |
 | "who is our ICP / who to prioritize / target account strategy" | icp-synthesis-analyst |
+| "how much pipeline/deals influenced by organic/direct/blog, by week/month/quarter" | marketing-influence-analyst |
+| "how to split budget across channels / marginal ROI by channel" | marketing-mix-analyst |
 
 ## Parallel multi-worker dispatch
 

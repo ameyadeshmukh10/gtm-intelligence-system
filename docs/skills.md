@@ -205,6 +205,40 @@ Outputs `data/results/<run_id>_marketing_mix_model.json`.
 
 ---
 
+## Marketing Influence Report skill (self-contained, one call)
+
+`skills/reports/influence_report.py` is a **single deterministic skill** that runs the entire
+pull → enrich → signal → cohort chain for the organic/direct/blog influence report. It does NOT depend on
+`py_feature_engineering`; it uses `HubSpotClient` directly and emits one envelope. Driven by the
+**marketing-influence-analyst** agent and the web app `/influence` surface.
+
+### influence_report (skills/reports/)
+Pull deals in a window → resolve associated contacts + companies + capped company-contacts → detect the
+locked organic/direct/blog signal set → bucket deals by `createdate` into week/month/quarter cohorts →
+report influenced-vs-cold deal count + pipeline $ per period + a sub-signal breakdown.
+
+```json
+{"start":"2026-01-01","end":"2026-03-31","granularity":"quarter",
+ "pipeline":"default","cap_company_contacts":25}
+```
+
+Params: `start`, `end` (ISO dates, inclusive), `granularity` ∈ {week, month, quarter},
+`pipeline` (default "default"), `cap_company_contacts` (default 25; 0 disables the company-contact net),
+optional `run_id` (defaults to `influence_<granularity>_<start>_<end>`).
+
+Outputs: `data/features/<run_id>.parquet` (one row per deal + signal flags), `data/features/<run_id>_manifest.json`,
+`data/results/<run_id>_influence_report.json`. Deterministic — identical params yield byte-identical results.
+
+### Supporting modules (not standalone skills)
+- **`skills/common/marketing_signals.py`** — the LOCKED signal definitions (the single source of truth):
+  `discover_linkedin_organic_props`, `contact_signal_flags`, `company_signal_flags`, `target_definition_text`.
+- **`skills/common/deal_graph.py`** — `build_deal_graph(client, start, end, pipeline, cap_company_contacts)`
+  resolves deals→contacts→companies→capped company-contacts and batch-reads them; caches raw pulls to `data/raw/`.
+
+See `docs/analysis_rules.md` (Appendix) for the authoritative signal definition.
+
+---
+
 ## Filter operator reference (hs_pull_*)
 
 | Input | HubSpot op |

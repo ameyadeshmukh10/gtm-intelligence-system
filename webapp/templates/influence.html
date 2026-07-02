@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Influence · GTM Intelligence{% endblock %}
+{% block content %}
+<h1>Marketing Influence Report</h1>
+<p class="sub">Share of created deals &amp; pipeline touched by an <strong>organic / direct / blog</strong>
+  signal — on the deal's contacts, its companies, or those companies' contacts (capped). Bucketed by
+  deal create date.</p>
+
+<div class="card">
+  <h3>Run a report</h3>
+  <form method="post" action="/influence/run" class="grid cols-4" style="align-items:end;gap:12px">
+    <label>Start<br><input type="date" name="start" required value="2026-01-01"></label>
+    <label>End<br><input type="date" name="end" required value="2026-03-31"></label>
+    <label>Granularity<br>
+      <select name="granularity">
+        <option value="week">Weekly</option>
+        <option value="month" selected>Monthly</option>
+        <option value="quarter">Quarterly</option>
+      </select></label>
+    <label>Company-contact cap<br><input type="number" name="cap_company_contacts" value="25" min="0" max="100"></label>
+    <div><button type="submit">Run report</button></div>
+  </form>
+  <small class="sub">Runs as a background job (pulls live HubSpot data). Watch status below; the result
+    appears here when it finishes.</small>
+</div>
+
+{% if jobs %}
+<h2>Recent runs</h2>
+<table>
+  <tr><th>#</th><th>Report</th><th>Status</th><th>Created</th><th>Finished</th><th></th></tr>
+  {% for job in jobs %}{% include "partials/job_row.html" %}{% endfor %}
+</table>
+<div id="logs" class="sub" style="white-space:pre-wrap;margin-top:8px"></div>
+{% endif %}
+
+{% if runs %}
+<h2>Saved reports</h2>
+<table>
+  <tr><th>Run</th><th>Window</th><th>Granularity</th><th class="num">Deals</th><th class="num">% influenced</th></tr>
+  {% for r in runs %}
+  <tr>
+    <td><a href="/influence/view?run_id={{ r.run_id }}">{{ r.run_id }}</a></td>
+    <td>{{ r.start }} → {{ r.end }}</td>
+    <td>{{ r.granularity }}</td>
+    <td class="num">{{ r.n_deals }}</td>
+    <td class="num">{{ '%.1f'|format((r.pct_deals_influenced or 0) * 100) }}%</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if res %}
+<h2>{{ res.window.granularity|capitalize }} report · {{ res.window.start }} → {{ res.window.end }}</h2>
+<p class="sub"><strong>Target:</strong> {{ res.target_definition }}</p>
+
+<div class="grid cols-4">
+  <div class="card"><h3>Deals</h3><div class="stat">{{ res.totals.n_deals }}</div></div>
+  <div class="card"><h3>Pipeline</h3><div class="stat">${{ '{:,.0f}'.format(res.totals.pipeline_usd) }}</div></div>
+  <div class="card"><h3>Influenced deals</h3><div class="stat">{{ res.totals.influenced_deals }}
+    <small>{{ '%.1f'|format(res.totals.pct_deals_influenced * 100) }}%</small></div></div>
+  <div class="card"><h3>Influenced pipeline</h3><div class="stat">${{ '{:,.0f}'.format(res.totals.influenced_pipeline_usd) }}
+    <small>{{ '%.1f'|format(res.totals.pct_pipeline_influenced * 100) }}%</small></div></div>
+</div>
+
+<div class="grid cols-2">
+  <div class="card"><h3>Influenced vs cold pipeline by period</h3><div id="c_pipe" class="chart"></div></div>
+  <div class="card"><h3>Influence rate by period</h3><div id="c_rate" class="chart"></div></div>
+</div>
+
+<h2>Cohort by period</h2>
+<table>
+  <tr><th>Period</th><th class="num">Deals</th><th class="num">Influenced</th><th class="num">Cold</th>
+    <th class="num">Infl. rate</th><th class="num">Infl. pipeline</th><th class="num">Cold pipeline</th>
+    <th class="num">$ infl. rate</th></tr>
+  {% for p in res.periods %}
+  <tr>
+    <td>{{ p.period }}</td>
+    <td class="num">{{ p.total_deals }}</td>
+    <td class="num">{{ p.influenced_deals }}</td>
+    <td class="num">{{ p.cold_deals }}</td>
+    <td class="num">{{ '%.1f'|format(p.influence_rate_deals * 100) }}%</td>
+    <td class="num">${{ '{:,.0f}'.format(p.influenced_pipeline_usd) }}</td>
+    <td class="num">${{ '{:,.0f}'.format(p.cold_pipeline_usd) }}</td>
+    <td class="num">{{ '%.1f'|format(p.influence_rate_pipeline * 100) }}%</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Sub-signal breakdown</h2>
+<p class="sub">Deals carrying each individual signal (overlapping — a deal can carry several).</p>
+<table>
+  <tr><th>Signal</th><th class="num">Deals</th><th class="num">Pipeline</th></tr>
+  {% for s in res.sub_signals %}
+  <tr><td>{{ s.signal }}</td><td class="num">{{ s.deals }}</td>
+    <td class="num">${{ '{:,.0f}'.format(s.pipeline_usd) }}</td></tr>
+  {% endfor %}
+</table>
+<p class="sub">Sanity: {{ res.sanity.influenced_deals }} influenced ≤ {{ res.sanity.n_deals }} total
+  ({{ 'OK' if res.sanity.ratio_ok else 'FAIL' }}). Blog activity is undercounted (HubSpot stores only
+  first/last URL per contact).</p>
+{% else %}
+<div class="banner">No influence report yet — run one above.</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if res %}
+<script>
+const IC = {{ charts|tojson }};
+const LAYOUT = {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+  font:{color:'#cfd3ea'}, margin:{t:10,r:10,b:50,l:60},
+  xaxis:{gridcolor:'#2a3050'}, yaxis:{gridcolor:'#2a3050'}};
+const CFG = {displayModeBar:false, responsive:true};
+
+Plotly.newPlot('c_pipe', [
+  {type:'bar', x:IC.periods, y:IC.influenced_pipeline, name:'influenced', marker:{color:'#6ea8fe'}},
+  {type:'bar', x:IC.periods, y:IC.cold_pipeline, name:'cold', marker:{color:'#475569'}}
+], {...LAYOUT, barmode:'stack', showlegend:true, legend:{orientation:'h'},
+   yaxis:{...LAYOUT.yaxis, title:'pipeline ($)'}}, CFG);
+
+Plotly.newPlot('c_rate', [
+  {type:'scatter', mode:'lines+markers', x:IC.periods, y:IC.influence_rate_deals,
+   name:'by deal count', line:{color:'#4ade80'}},
+  {type:'scatter', mode:'lines+markers', x:IC.periods, y:IC.influence_rate_pipeline,
+   name:'by pipeline $', line:{color:'#6ea8fe'}}
+], {...LAYOUT, showlegend:true, legend:{orientation:'h'},
+   yaxis:{...LAYOUT.yaxis, title:'% influenced', rangemode:'tozero'}}, CFG);
+</script>
+{% endif %}
+{% endblock %}

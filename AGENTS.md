@@ -32,11 +32,14 @@ A fully-agentic port of the EverWorker GTM Intelligence System (see `EverWorker_
 │   ├── program-attribution-analyst.md
 │   ├── signal-combination-analyst.md
 │   ├── trend-intelligence-analyst.md
-│   └── icp-synthesis-analyst.md
+│   ├── icp-synthesis-analyst.md
+│   ├── marketing-mix-analyst.md          ← on-demand: top-down spend→pipeline MMM
+│   └── marketing-influence-analyst.md    ← on-demand: organic/direct/blog influence report
 ├── skills/
-│   ├── common/                  ← I/O contract, manifest, cache helpers
-│   ├── hubspot/                 ← 8 HubSpot API connector skills
-│   └── python/                  ← 12 Python statistical skills
+│   ├── common/                  ← I/O contract, manifest, cache, deal_graph, marketing_signals
+│   ├── hubspot/                 ← HubSpot API connector skills
+│   ├── python/                  ← Python statistical skills
+│   └── reports/                 ← self-contained report skills (influence_report)
 ├── data/                        ← artifact cache (gitignored)
 │   ├── raw/                     ← parquet from hs_pull_*
 │   ├── features/                ← parquet + manifest from py_feature_engineering
@@ -63,7 +66,9 @@ Example prompts:
 | "Do contacts who attend an event AND submit an inbound form convert at higher rates?" | `signal-combination-analyst` |
 | "Is our pipeline conversion rate improving over the last 12 months?" | `trend-intelligence-analyst` |
 | "Who is our best ICP based on what actually closes?" | `icp-synthesis-analyst` |
-| "Run a full GTM audit and tell me what to change." | All five in sequence |
+| "How much pipeline did organic/direct/blog influence by month/quarter?" | `marketing-influence-analyst` |
+| "How should we split next quarter's budget across channels?" | `marketing-mix-analyst` |
+| "Run a full GTM audit and tell me what to change." | The five contact/deal analysts in sequence |
 | "Pull every Stage 1 deal created since January" | Direct skill call (no specialist) |
 
 ## Skill contract (mandatory)
