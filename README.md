@@ -1,6 +1,6 @@
 # GTM Intelligence System — Claude Code edition
 
-A fully-agentic port of the EverWorker GTM Intelligence System spec, adapted to run inside Claude Code. A top-level orchestrator routes any GTM analytical question to one of five specialist analyst subagents, each composed of HubSpot API connector skills (live data pulls) and Python statistical skills (deterministic computation).
+GTM Intelligence System runs inside Claude Code. A top-level orchestrator routes any GTM analytical question to one of five specialist analyst subagents, each composed of HubSpot API connector skills (live data pulls) and Python statistical skills (deterministic computation).
 
 ## Quickstart
 
