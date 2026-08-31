@@ -77,6 +77,8 @@ A feature-engineering foundation plus 11 analytical skills (`skills/python/`), e
 
 The trick that makes it all composable: `py_feature_engineering` classifies every column into a **manifest** (numeric / categorical / binary / rollup / date-derived / excluded), and every downstream skill auto-resolves its inputs from it. Agents pass a `run_id`, never column lists — the LLM stays out of the bookkeeping loop entirely.
 
+*Not a statistician? Every one of these methods — what it does, how it works, and why it was chosen — is explained in plain English in [the methodology section below](#the-methodology-explained-in-plain-english).*
+
 ### 4. Bayesian Marketing Mix Model
 
 A top-down spend→pipeline model (`py_mmm_features` + `py_marketing_mix_model` + two spend-ingestion skills) that complements the bottom-up attribution agents:
@@ -87,7 +89,7 @@ A top-down spend→pipeline model (`py_mmm_features` + `py_marketing_mix_model` 
 - Outputs per-channel contribution with **90% credible intervals**, marginal ROI, response curves, and a baseline-vs-incremental split
 - Ingestion pipeline parses an Apple `.numbers` budget workbook into tidy spend data and groups channels to keep the model identifiable on thin monthly data — and **warns explicitly when it's under-identified** instead of printing confident nonsense
 
-MMM answers *budget allocation*; program attribution answers *program cuts*. The system knows the difference and enforces it.
+MMM answers *budget allocation*; program attribution answers *program cuts*. The system knows the difference and enforces it. *(What adstock, saturation, and Bayesian inference actually mean — and why they're the right tools here — is unpacked in [the methodology section](#the-methodology-explained-in-plain-english).)*
 
 ### 5. Marketing Influence Report — a productized analysis
 
@@ -122,6 +124,108 @@ A deterministic FastAPI + HTMX + Plotly app (`webapp/`) that runs every skill **
 ### 8. Token-efficient agent/skill contract
 
 Every one of the 25 skills speaks the same protocol: JSON params in, one compact JSON envelope out (`results` / `summary` / `metadata.warnings` / `metadata.artifacts`), full data cached to parquet/JSON on disk. Agents see **~500 bytes per skill call**, never 50 MB dataframes — and drill into disk artifacts only when a citation needs granular numbers. Three cache layers (raw pulls keyed by query hash, feature matrices keyed by `run_id`, results keyed by `run_id + skill`) make audits resumable after any crash and follow-up questions nearly free.
+
+---
+
+## The methodology, explained in plain English
+
+You don't need a statistics background to evaluate this system — but you should know *why* each method is here, because none of them were picked at random. The common thread: **CRM data is messy.** Conversion is rare (often 1–2%), the numbers are wildly skewed (one hyperactive contact can have 400 page views while the median has 3), samples are small, and half the columns secretly leak the outcome. Every method below was chosen to survive exactly those conditions — and to fail loudly instead of confidently when it can't.
+
+### Comparing converters to non-converters — Mann-Whitney U
+
+**The question:** "Do contacts who became opportunities look different on this metric (email opens, sessions, form fills) than those who didn't?"
+
+**How it works:** instead of comparing averages, it pools both groups, ranks everyone from lowest to highest, and asks whether one group's members systematically rank higher than the other's.
+
+**Why this and not a t-test:** a t-test compares *means* and assumes bell-curve data. CRM engagement metrics are nothing like a bell curve — a handful of extreme contacts drag the average wherever they want, producing false signals. Ranks don't care whether the top contact has 400 page views or 4,000, so outliers can't manufacture a finding. As a bonus, the direction of the medians carries meaning here: when *converters* have the **lower** median on a volume metric, that's the signature of a mass program blasting an unqualified audience — the system surfaces it instead of discarding it.
+
+### Comparing segments — chi-square + lift
+
+**The question:** "Does the Manufacturing segment (or the VP-title segment, or the organic-search segment) convert at a genuinely different rate than everyone else?"
+
+**How it works:** every segment's conversion rate is compared to the overall baseline two ways at once. **Lift** expresses the business size of the difference ("2.4× baseline"); the **chi-square test** asks whether a gap that size could plausibly appear by luck given how few people are in the segment.
+
+**Why both:** either one alone misleads. A 3× lift on 6 contacts is a coin-flip story, and a statistically significant 1.05× lift is real but useless. The system requires both, and anything under n=15 is automatically demoted to "directional only" — it gets reported, but it is not allowed to drive a recommendation.
+
+### Ranking what matters — Random Forest
+
+**The question:** "Out of 100+ attributes, which ones actually predict conversion — including in combination?"
+
+**How it works:** hundreds of decision trees are each trained on a random slice of the data and vote together; features are ranked by how much they improve the forest's predictions. Performance is scored by **AUC** — 0.5 means the model is guessing like a coin flip, 1.0 means it separates converters from non-converters perfectly.
+
+**Why this, and why configured this way:** single-variable tests (like the two above) can't see patterns that only appear in combination — "enterprise *and* inbound" mattering when neither does alone. Random Forest can. Three configuration choices do the heavy lifting:
+- **Balanced class weights** — when only 1–2% of contacts convert, a naive model gets 98% accuracy by predicting "no" for everyone. Balancing forces it to actually learn what a converter looks like.
+- **5-fold stratified cross-validation** — the model is always scored on data it never trained on, five times over, so the AUC is an honest out-of-sample number, not a memorization score.
+- **Leakage detection** — in CRM data, a suspiciously *good* model is usually a broken one: an AUC above 0.95 almost always means a feature that only exists *because* the deal exists (a close date, a "meeting booked" flag) snuck into the inputs. The skill flags this automatically instead of celebrating it. A believable real-world signal lands at 0.7–0.85.
+
+### Directions of travel — Spearman rank correlation
+
+**The question:** "As X goes up, does Y reliably go up (or down) with it?" — used for trends over time and dose-response relationships.
+
+**Why this and not the familiar (Pearson) correlation:** Pearson assumes the relationship is a straight line and gets distorted by outliers. Spearman only asks whether the relationship is consistently *directional* — which is the actual business question ("is conversion drifting down month over month?") — and, being rank-based, shrugs off the same outliers that plague every other CRM metric.
+
+### Funnel mechanics — the stage-conversion matrix
+
+**The question:** "Of deals that reached Stage 1, what share reached Stage 2, and how long did they sit there?"
+
+**How it works:** plain conversion rates per stage transition, plus time-in-stage — reported as the **median**, not the mean, because one deal stuck for 400 days shouldn't define what "typical" looks like. Deals whose stage dates are out of order (a real data-quality problem in every CRM) are excluded and *counted*, so the denominator is always defensible.
+
+### Do signals amplify or cancel? — 2×2 interaction effects
+
+**The question:** "Contacts who attended an event convert at 8%. Contacts who filled an inbound form convert at 11%. What about contacts who did *both*?"
+
+**How it works:** for each pair of signals, the system computes what the combined rate *should* be if the two effects simply added up — then compares it to the observed rate. Beat the expectation by more than 10 points and it's flagged **SYNERGY** (a routing rule: prioritize contacts with both). Fall more than 5 points short and it's flagged **SUPPRESSION**.
+
+**Why it matters:** marketing signals are not independent, and suppression is the finding teams never look for — it's how you discover that a high-volume nurture is actively diluting your best intent signal by burying it in unqualified volume. Simple per-program reporting can never see this.
+
+### Finding archetypes — KMeans clustering
+
+**The question:** "What natural groups of behavior exist in our database — and which group actually produces deals?"
+
+**How it works:** contacts are grouped by behavioral similarity, with no knowledge of who converted — conversion is only revealed *afterward*, per cluster. The number of clusters isn't guessed: the system tries k=3, 4, and 5 and picks the one the data supports best (highest **silhouette score**, a measure of how cleanly separated the groups are). A best-to-worst cluster gap above 3× is the threshold for calling it real archetype separation.
+
+**Why unsupervised:** everything above starts from the outcome and works backward. Clustering starts from behavior and works forward — it's the method that finds the segment you didn't know to ask about.
+
+### The interpretable cross-check — L2 logistic regression
+
+**The question:** "For each attribute, which *direction* does it push, and how hard?"
+
+**How it works:** a linear model where every feature gets a readable coefficient — positive pushes toward conversion, negative away. The **L2 regularization** is essential in CRM data, where features are heavily correlated (opens correlate with clicks correlate with sessions): without it, coefficients swing wildly and flip signs; with it, they stay stable and honest.
+
+**Why keep it alongside Random Forest:** the forest is better at *finding* signal but is a black box about direction; logistic regression is weaker at detection but fully transparent. When both agree on a feature, confidence goes way up. When they disagree, that's a flag worth investigating — and the system treats it as one.
+
+### Time and cohorts — trend + cohort analysis
+
+**The question:** "Is conversion actually improving, or does it just look that way?"
+
+**How it works:** monthly conversion rates are tested for direction with Spearman (above), and contacts are split into early/mid/late cohorts compared with chi-square. Two guardrails make the answers trustworthy: trends must be **segmented by program bucket**, because an aggregate "conversion collapse" once turned out to be 70% channel-mix shift, not quality decline; and the most recent month is **recency-flagged**, because new contacts simply haven't had time to convert yet — a dip in the latest month is usually lag, not decline.
+
+### The Bayesian Marketing Mix Model, from first principles
+
+Everything above is **bottom-up**: it looks at individual contacts and asks which touches appear on the ones that converted. That approach has a blind spot — it can only credit what got tracked to a person. Brand effects, dark social, "I saw you everywhere and finally googled you" — invisible. The MMM is the **top-down complement**: it ignores individuals entirely and asks one question of the aggregate history: *"when we spent more in channel X, did more pipeline show up — after accounting for everything else?"* Four pieces make that question answerable honestly:
+
+**Adstock (carryover).** Money spent this month keeps working after this month — a March webinar books meetings into May. Each channel's spend is smeared forward in time with a decaying weight, so the model credits outcomes to the spend that plausibly caused them rather than demanding same-month payoff. Without this, any channel with a lag would look broken.
+
+**Hill saturation (diminishing returns).** The first \$10k in a channel buys more than the tenth \$10k — audiences saturate. Each channel gets a curve that rises steeply then flattens. This is the piece that makes *budget reallocation* answerable: the model can say what the **next** dollar earns in each channel (marginal ROI), which is a completely different question from what the *average* historical dollar earned — and it's the marginal number that should drive allocation.
+
+**A Negative-Binomial outcome.** The thing being predicted is a count — deals created per month — that is small and noisy. Ordinary regression assumes bell-curve errors and will happily predict −3 deals; the Negative-Binomial distribution is purpose-built for noisy, non-negative counts. The model is also **additive on the response scale**: baseline plus every channel's contribution sums to the fitted total *exactly*, so no deal is ever double-credited to two channels.
+
+**Bayesian inference — the honest part.** This instance has ~17 monthly observations and the model has more parameters than that. Classical regression on that data would either refuse to run or produce absurdly confident nonsense. The Bayesian approach starts each parameter with a skeptical prior (e.g., "a channel's effect is probably modest, and can be zero") and lets the data pull it away from that only as far as the evidence justifies. Two consequences, both features:
+
+1. **Every output is a range, not a point.** "Paid search contributed 12 deals" becomes "6 to 19 deals, 90% credible interval" — and when a channel's interval includes zero, the system says *the data cannot distinguish this channel's effect from nothing*, in the UI, instead of printing a confident number.
+2. **Thin data degrades gracefully.** With too many channels for the data to identify, estimates collapse toward their priors rather than exploding — and the pipeline *warns* that it's under-identified and tells you to merge channel groups.
+
+Three inference backends provide a rigor ladder: a fast **Laplace approximation** (the default — fits in seconds anywhere), a **Metropolis MCMC** sampler used as a cross-check with Gelman-Rubin R̂ convergence diagnostics (a formal test that the sampler actually settled on an answer), and **PyMC NUTS** (the modern gold-standard sampler) for final reporting. Getting the same story from independent inference methods is itself a validation step.
+
+The final discipline: MMM output is presented as **directional until calibrated by a lift experiment**, because a model fit on observational history is sophisticated correlation, not proof. The agent that owns this model is explicitly forbidden from pretending otherwise.
+
+### The rules that sit above all of it
+
+Three principles bind every method together, enforced in every agent's system prompt:
+
+- **Statistical + practical significance, together.** A p<0.01 finding with a trivial gap is not actionable; a huge gap at p=0.08 is "collect more data," not "act." Every finding needs both.
+- **n is part of every number.** "Enterprise converts at 73%" is banned; "73% (n=41)" is the required form. Below n=15, findings are labeled directional; below n=5, unreported.
+- **Correlation is never causation.** "Associated with" and "predicts" are allowed; "drives" and "causes" require an actual experiment. The full phrasing rules live in [docs/interpretation.md](docs/interpretation.md).
 
 ---
 
